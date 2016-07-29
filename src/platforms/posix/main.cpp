@@ -170,6 +170,21 @@ bool px4_exit_requested(void)
 	return _ExitFlag;
 }
 
+static void set_cpu_scaling()
+{
+#ifdef __PX4_POSIX_EAGLE
+	// On Snapdragon we miss updates in sdlog2 unless all 4 CPUs are run
+	// at the maximum frequency all the time.
+	// Interestingely, cpu0 and cpu3 set the scaling for all 4 CPUs on Snapdragon.
+	system("echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor");
+	system("echo performance > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor");
+
+	// Alternatively we could also raise the minimum frequency to save some power,
+	// unfortunately this still lead to some drops.
+	//system("echo 1190400 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq");
+#endif
+}
+
 int main(int argc, char **argv)
 {
 	bool daemon_mode = false;
@@ -197,6 +212,8 @@ int main(int argc, char **argv)
 	//sigaction(SIGTERM, &sig_int, NULL);
 	sigaction(SIGFPE, &sig_fpe, NULL);
 	sigaction(SIGSEGV, &sig_segv, NULL);
+
+	set_cpu_scaling();
 
 	int index = 1;
 	char *commands_file = nullptr;

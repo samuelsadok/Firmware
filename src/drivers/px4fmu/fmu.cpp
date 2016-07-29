@@ -221,7 +221,10 @@ private:
 	bool		_safety_disabled;
 	orb_advert_t		_to_safety;
 
-	static bool	arm_nothrottle() { return (_armed.prearmed && !_armed.armed); }
+	static bool	arm_nothrottle()
+	{
+		return ((_armed.prearmed && !_armed.armed) || _armed.in_esc_calibration_mode);
+	}
 
 	static void	cycle_trampoline(void *arg);
 	void		cycle();
@@ -338,6 +341,14 @@ PX4FMU::PX4FMU() :
 
 	memset(_controls, 0, sizeof(_controls));
 	memset(_poll_fds, 0, sizeof(_poll_fds));
+
+	// Safely initialize armed flags.
+	_armed.armed = false;
+	_armed.prearmed = false;
+	_armed.ready_to_arm = false;
+	_armed.lockdown = false;
+	_armed.force_failsafe = false;
+	_armed.in_esc_calibration_mode = false;
 
 	// rc input, published to ORB
 	memset(&_rc_in, 0, sizeof(_rc_in));
@@ -861,9 +872,6 @@ PX4FMU::update_pwm_out_state(bool on)
 		up_pwm_servo_init(_pwm_mask);
 		set_pwm_rate(_pwm_alt_rate_channels, _pwm_default_rate, _pwm_alt_rate);
 		_pwm_initialized = true;
-
-	} else {
-		_pwm_initialized = false;
 	}
 
 	up_pwm_servo_arm(on);
@@ -980,6 +988,19 @@ PX4FMU::cycle()
 
 				poll_id++;
 			}
+
+			/* During ESC calibration, we overwrite the throttle value. */
+			if (i == 0 && _armed.in_esc_calibration_mode) {
+
+				/* Set all controls to 0 */
+				memset(&_controls[i], 0, sizeof(_controls[i]));
+
+				/* except thrust to maximum. */
+				_controls[i].control[3] = 1.0f;
+
+				/* Switch off the PWM limit ramp for the calibration. */
+				_pwm_limit.state = PWM_LIMIT_STATE_ON;
+			}
 		}
 
 		/* can we mix? */
@@ -1029,8 +1050,9 @@ PX4FMU::cycle()
 			uint16_t pwm_limited[_max_actuators];
 
 			/* the PWM limit call takes care of out of band errors, NaN and constrains */
-			pwm_limit_calc(_throttle_armed, arm_nothrottle(), num_outputs, _reverse_pwm_mask, _disarmed_pwm, _min_pwm, _max_pwm,
-				       outputs, pwm_limited, &_pwm_limit);
+			pwm_limit_calc(_throttle_armed, arm_nothrottle(), num_outputs, _reverse_pwm_mask,
+				       _disarmed_pwm, _min_pwm, _max_pwm, outputs, pwm_limited, &_pwm_limit);
+
 
 			/* overwrite outputs in case of lockdown with disarmed PWM values */
 			if (_armed.lockdown) {
@@ -1098,11 +1120,14 @@ PX4FMU::cycle()
 	if (updated) {
 		orb_copy(ORB_ID(actuator_armed), _armed_sub, &_armed);
 
-		/* update the armed status and check that we're not locked down */
-		_throttle_armed = _safety_off && _armed.armed && !_armed.lockdown;
+		/* Update the armed status and check that we're not locked down.
+		 * We also need to arm throttle for the ESC calibration. */
+		_throttle_armed = (_safety_off && _armed.armed && !_armed.lockdown) ||
+				  (_safety_off && _armed.in_esc_calibration_mode);
+
 
 		/* update PWM status if armed or if disarmed PWM values are set */
-		bool pwm_on = _armed.armed || _num_disarmed_set > 0;
+		bool pwm_on = _armed.armed || _num_disarmed_set > 0 || _armed.in_esc_calibration_mode;
 
 		if (_pwm_on != pwm_on) {
 			_pwm_on = pwm_on;
@@ -1319,10 +1344,9 @@ PX4FMU::cycle()
 
 		} else {
 			// Scan the next protocol
-			set_rc_scan_state(RC_SCAN_SUMD);
+			set_rc_scan_state(RC_SCAN_PPM);
 		}
 
-		set_rc_scan_state(RC_SCAN_PPM);
 		break;
 
 	case RC_SCAN_PPM:
@@ -1450,7 +1474,7 @@ PX4FMU::control_callback(uintptr_t handle,
 	}
 
 	/* throttle not arming - mark throttle input as invalid */
-	if (arm_nothrottle()) {
+	if (arm_nothrottle() && !_armed.in_esc_calibration_mode) {
 		if ((control_group == actuator_controls_s::GROUP_INDEX_ATTITUDE ||
 		     control_group == actuator_controls_s::GROUP_INDEX_ATTITUDE_ALTERNATE) &&
 		    control_index == actuator_controls_s::INDEX_THROTTLE) {
@@ -1537,7 +1561,12 @@ PX4FMU::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 		break;
 
 	case PWM_SERVO_DISARM:
-		update_pwm_out_state(false);
+
+		/* Ignore disarm if disarmed PWM is set already. */
+		if (_num_disarmed_set == 0) {
+			update_pwm_out_state(false);
+		}
+
 		break;
 
 	case PWM_SERVO_GET_DEFAULT_UPDATE_RATE:

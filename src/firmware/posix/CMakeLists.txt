@@ -37,7 +37,7 @@ if ("${BOARD}" STREQUAL "eagle" OR ("${BOARD}" STREQUAL "excelsior"))
 			 DEPENDS mainapp
 			 DEST /home/linaro)
 
-elseif ("${BOARD}" STREQUAL "rpi2")
+elseif ("${BOARD}" STREQUAL "rpi")
 
 	add_executable(mainapp
 		${CMAKE_SOURCE_DIR}/src/platforms/posix/main.cpp
@@ -57,7 +57,7 @@ elseif ("${BOARD}" STREQUAL "rpi2")
 			 OS ${OS}
 			 BOARD ${BOARD}
 			 FILES ${CMAKE_CURRENT_BINARY_DIR}/mainapp
-				 ${CMAKE_SOURCE_DIR}/posix-configs/rpi2/mainapp.config
+				 ${CMAKE_SOURCE_DIR}/posix-configs/rpi/mainapp.config
 			 DEPENDS mainapp
 			 DEST /home/pi)
 
@@ -153,5 +153,13 @@ foreach(viewer none jmavsim gazebo replay)
 		endforeach()
 	endforeach()
 endforeach()
+
+#=============================================================================
+# install
+#
+
+install(TARGETS mainapp DESTINATION bin)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/ROMFS DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/posix-configs DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
 
 # vim: set noet ft=cmake fenc=utf-8 ff=unix :

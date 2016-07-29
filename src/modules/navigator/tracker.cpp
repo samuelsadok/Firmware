@@ -752,7 +752,7 @@ void Tracker::calc_distances() {
 
         // Walk forward or backward until we reach the next interesting index (node, jump, home or end-of-graph).
         size_t index = walk_origin;
-        uint16_t node = 0;
+        size_t node = 0;
         float interval_length = 0;
         if (walking_forward)
             node = walk_far_forward(index, graph_home_index, interval_length);
